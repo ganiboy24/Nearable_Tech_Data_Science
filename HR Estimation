@@ -1,0 +1,115 @@
+import cv2
+import numpy as np
+import time
+from scipy.signal import find_peaks
+from scipy.fft import fft, fftfreq
+import matplotlib.pyplot as plt
+
+# Load face cascade with slight parameter modifications if needed
+face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+cap = cv2.VideoCapture(0)
+
+signal = []
+timestamps = []
+fps = 30  # Adjust if necessary
+
+start_time = time.time()
+duration = 10  # seconds
+
+while (time.time() - start_time < duration):
+    ret, frame = cap.read()
+    if not ret:
+        print("Failed to grab frame.")
+        break
+
+    # Print frame dimensions for debugging
+    print("Frame shape:", frame.shape)
+
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    # You can adjust parameters: try changing scaleFactor to 1.1 or 1.05, and minNeighbors to 3 or 4.
+    faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4)
+
+    print("Faces detected:", len(faces))  # Debug print
+
+    if len(faces) > 0:
+        (x, y, w, h) = faces[0]
+        print("Face coordinates:", x, y, w, h)
+
+        # Calculate ROI (forehead) using safe indexing
+        roi_x = max(0, int(x + 0.2 * w))
+        roi_y = max(0, y)
+        roi_w = min(frame.shape[1] - roi_x, int(0.6 * w))
+        roi_h = min(frame.shape[0] - roi_y, int(0.3 * h))
+
+        # Check if ROI dimensions are valid
+        if roi_w <= 0 or roi_h <= 0:
+            print("Invalid ROI dimensions:", roi_w, roi_h)
+            continue
+
+        roi = frame[roi_y:roi_y+roi_h, roi_x:roi_x+roi_w]
+
+        # Debug: Print ROI shape and its average green channel value
+        print("ROI shape:", roi.shape)
+        green_avg = np.mean(roi[:, :, 1])
+        print("Green channel average:", green_avg)
+
+        # Only append if ROI seems valid (non-constant)
+        if roi.size > 0:
+            signal.append(green_avg)
+            timestamps.append(time.time() - start_time)
+
+        # Draw rectangles for face and ROI for visual debugging
+        cv2.rectangle(frame, (x, y), (x+w, y+h), (255, 0, 0), 2)  # Face
+        cv2.rectangle(frame, (roi_x, roi_y), (roi_x+roi_w, roi_y+roi_h), (0, 255, 0), 2)  # ROI
+
+    else:
+        print("No face detected in this frame.")
+
+    cv2.imshow("Webcam", frame)
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
+
+cap.release()
+cv2.destroyAllWindows()
+
+# Check if enough signal points were collected
+if len(signal) < 20:
+    print("Not enough signal points collected. Collected:", len(signal))
+else:
+    # Proceed to FFT analysis
+    signal = np.array(signal)
+    timestamps = np.array(timestamps)
+
+    # (Optional) Interpolate to uniform time steps
+    from scipy.interpolate import interp1d
+    uniform_time = np.linspace(0, duration, len(signal))
+    try:
+        interp = interp1d(timestamps, signal, kind='cubic')
+        resampled = interp(uniform_time)
+    except Exception as e:
+        print("Interpolation error:", e)
+        resampled = signal
+
+    # Remove the mean (DC offset)
+    resampled = resampled - np.mean(resampled)
+
+    n = len(resampled)
+    # Use the approximate fps from capture; if unsure, you can also compute it from timestamps.
+    freqs = fftfreq(n, d=1/fps)
+    fft_values = np.abs(fft(resampled))
+
+    # Focus on the human heart rate frequency range (0.75–4 Hz)
+    valid = (freqs > 0.75) & (freqs < 4)
+    if np.any(valid):
+        peak_freq = freqs[valid][np.argmax(fft_values[valid])]
+        heart_rate = peak_freq * 60  # Hz to BPM conversion
+        print(f"Estimated Heart Rate: {heart_rate:.2f} BPM")
+    
+        plt.plot(freqs[valid]*60, fft_values[valid])
+        plt.title("FFT of rPPG Signal")
+        plt.xlabel("Frequency (BPM)")
+        plt.ylabel("Amplitude")
+        plt.grid()
+        plt.show()
+    else:
+        print("No valid frequency components found.")
