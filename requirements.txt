@@ -1,0 +1,21 @@
+asposestorage
+autorank
+biosppy
+ipython
+ipywidgets
+lmfit
+# mediapipe
+plotly
+PySimpleGUI
+scikit_posthocs
+scikit-image
+tqdm
+# tensorflow
+torch
+torchaudio
+torchvision
+tables
+h5py
+numba
+nbformat
+pyvhr-cpu
